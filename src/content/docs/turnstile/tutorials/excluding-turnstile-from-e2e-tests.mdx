@@ -1,0 +1,129 @@
+---
+title: Exclude Turnstile from E2E tests
+pcx_content_type: tutorial
+updated: 2025-01-24
+difficulty: Intermediate
+content_type: 📝 Tutorial
+languages:
+  - TypeScript
+tags:
+  - Testing
+  - Node.js
+sidebar:
+  order: 6
+---
+
+This tutorial explains how to handle Turnstile in your end-to-end (E2E) tests by using Turnstile's dedicated testing keys.
+
+## Overview
+
+When running E2E tests, you often want to bypass or simplify the Turnstile verification process. Cloudflare provides official test credentials that always pass verification, making them perfect for testing environments:
+
+- Test Sitekey: `1x00000000000000000000AA`
+- Test Secret Key: `1x0000000000000000000000000000000AA`
+
+For more details, see the [testing documentation](https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
+
+## ⚠️ Important Security Warning
+
+Never use test credentials in production! Always ensure:
+1. Test credentials are only used in test environments
+2. Production credentials are properly protected
+3. Your deployment process prevents test credentials from reaching production
+
+## Implementation Strategy
+
+The key to implementing test-environment detection is identifying test requests server-side. Here's a simple approach:
+
+```typescript
+// Detect test environments using IP addresses or headers
+function isTestEnvironment(request) {
+  const testIPs = ['127.0.0.1', '::1'];
+  const isTestIP = testIPs.includes(request.ip);
+  const hasTestHeader = request.headers['x-test-environment'] === 'secret-token';
+  
+  return isTestIP || hasTestHeader;
+}
+
+// Use the appropriate credentials based on the environment
+function getTurnstileCredentials(request) {
+  if (isTestEnvironment(request)) {
+    return {
+      sitekey: '1x00000000000000000000AA',
+      secretKey: '1x0000000000000000000000000000000AA'
+    };
+  }
+  
+  return {
+    sitekey: process.env.TURNSTILE_SITE_KEY,
+    secretKey: process.env.TURNSTILE_SECRET_KEY
+  };
+}
+```
+
+## Server-side Integration
+
+When rendering your page, inject the appropriate sitekey based on the environment:
+
+```typescript
+app.get('/your-form', (req, res) => {
+  const { sitekey } = getTurnstileCredentials(req);
+  res.render('form', { sitekey });
+});
+```
+
+## Client-side Integration
+
+Your template can then use the injected sitekey:
+
+```html
+<div class="turnstile" data-sitekey="<%= sitekey %>"></div>
+```
+
+## Best Practices
+
+1. **Environment Detection**
+   - Use multiple factors to identify test environments (IP, headers, etc.)
+   - Keep test environment identifiers secure
+   - Document your test environment setup
+
+2. **Credential Management**
+   - Store production credentials securely (e.g., environment variables)
+   - Never commit credentials to version control
+   - Use different credentials for each environment
+
+3. **Deployment Safety**
+   - Add checks to prevent test credentials in production
+   - Include credential validation in your CI/CD pipeline
+   - Monitor for accidental test credential usage
+
+## Testing Considerations
+
+- Test credentials will always pass verification
+- They're perfect for automated testing environments
+- They help avoid rate limiting during testing
+- They make tests more predictable and faster
+
+## Example Test Setup
+
+For Cypress or similar E2E testing frameworks:
+
+```typescript
+// Set test header for all test requests
+beforeEach(() => {
+  cy.intercept('*', (req) => {
+    req.headers['x-test-environment'] = 'secret-token';
+  });
+});
+
+// Your test can now interact with the form normally
+it('submits form successfully', () => {
+  cy.visit('/your-form');
+  cy.get('form').submit();
+  // Turnstile will automatically pass verification
+});
+```
+
+## Conclusion
+
+By using Turnstile's test credentials and proper environment detection, you can create reliable E2E tests while maintaining security in production. Remember to always keep test credentials separate from production and implement proper safeguards in your deployment process.
